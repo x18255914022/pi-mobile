@@ -283,6 +283,7 @@ class ChatViewModelThinkingExpansionTest {
                     messageTimestamp = "old-session",
                 ),
             )
+            dispatcher.scheduler.advanceUntilIdle()
 
             controller.emitSessionChanged("/tmp/new-session.jsonl")
             dispatcher.scheduler.advanceUntilIdle()
@@ -309,6 +310,7 @@ class ChatViewModelThinkingExpansionTest {
                         },
                 ),
             )
+            dispatcher.scheduler.advanceUntilIdle()
 
             waitForState(viewModel) { state ->
                 val assistants = state.timeline.filterIsInstance<ChatTimelineItem.Assistant>()
@@ -999,8 +1001,8 @@ class ChatViewModelThinkingExpansionTest {
                                     )
                                     add(
                                         buildJsonObject {
-                                            put("type", "image")
-                                            put("imageUrl", "https://example.test/image.png")
+                                            put("type", "image_uri")
+                                            put("image_uri", imageUri)
                                         },
                                     )
                                 },
@@ -1010,22 +1012,11 @@ class ChatViewModelThinkingExpansionTest {
             )
             dispatcher.scheduler.advanceUntilIdle()
 
-            val userItem = viewModel.userItems().single { it.id == "user-server-image" }
-            assertEquals(1, userItem.imageCount)
-            assertEquals(listOf(imageUri), userItem.imageUris)
+            val userItem = viewModel.userItems().last()
+            assertEquals("user-server-image", userItem.id)
+            assertEquals("with image", userItem.text)
+            assertEquals(listOf(imageUri), userItem.imagePendingUris)
         }
-
-    private fun ChatViewModel.userItems(): List<ChatTimelineItem.User> =
-        uiState.value.timeline.filterIsInstance<ChatTimelineItem.User>()
-
-    private fun ChatViewModel.assistantItems(): List<ChatTimelineItem.Assistant> =
-        uiState.value.timeline.filterIsInstance<ChatTimelineItem.Assistant>()
-
-    private fun ChatViewModel.singleAssistantItem(): ChatTimelineItem.Assistant {
-        val items = assistantItems()
-        assertEquals(1, items.size)
-        return items.single()
-    }
 
     private fun awaitInitialLoad(viewModel: ChatViewModel) {
         repeat(INITIAL_LOAD_WAIT_ATTEMPTS) {
@@ -1042,97 +1033,25 @@ class ChatViewModelThinkingExpansionTest {
         )
     }
 
-    private fun waitForState(
-        viewModel: ChatViewModel,
-        predicate: (ChatUiState) -> Boolean,
-    ) {
-        repeat(INITIAL_LOAD_WAIT_ATTEMPTS) {
-            dispatcher.scheduler.advanceUntilIdle()
+    private fun waitForState(viewModel: ChatViewModel, predicate: (ChatViewModelState) -> Boolean) {
+        repeat(WAIT_FOR_STATE_ATTEMPTS) {
             if (predicate(viewModel.uiState.value)) {
                 return
             }
-            Thread.sleep(INITIAL_LOAD_WAIT_STEP_MS)
+            Thread.sleep(WAIT_FOR_STATE_STEP_MS)
         }
 
-        error("Timed out waiting for expected ViewModel state")
+        val state = viewModel.uiState.value
+        error(
+            "Timed out waiting for state condition: " +
+                "isLoading=${state.isLoading}, error=${state.errorMessage}, timeline=${state.timeline.size}",
+        )
     }
 
-    private fun thinkingUpdate(
-        eventType: String,
-        delta: String? = null,
-        messageTimestamp: String?,
-    ): MessageUpdateEvent =
-        MessageUpdateEvent(
-            type = "message_update",
-            message = messageTimestamp?.let(::messageWithTimestamp),
-            assistantMessageEvent =
-                AssistantMessageEvent(
-                    type = eventType,
-                    contentIndex = 0,
-                    delta = delta,
-                ),
-        )
-
-    private fun textUpdate(
-        assistantType: String,
-        delta: String? = null,
-        content: String? = null,
-        messageTimestamp: String,
-    ): MessageUpdateEvent =
-        MessageUpdateEvent(
-            type = "message_update",
-            message = messageWithTimestamp(messageTimestamp),
-            assistantMessageEvent =
-                AssistantMessageEvent(
-                    type = assistantType,
-                    contentIndex = 0,
-                    delta = delta,
-                    content = content,
-                ),
-        )
-
-    private fun messageWithTimestamp(timestamp: String): JsonObject =
-        buildJsonObject {
-            put("timestamp", timestamp)
-        }
-
-    private fun historyWithUserMessages(count: Int): JsonObject =
-        buildJsonObject {
-            put(
-                "messages",
-                buildJsonArray {
-                    repeat(count) { index ->
-                        add(
-                            buildJsonObject {
-                                put("role", "user")
-                                put("content", "message-$index")
-                            },
-                        )
-                    }
-                },
-            )
-        }
-
-    private fun historyWithMessageTexts(messages: List<String>): JsonObject =
-        buildJsonObject {
-            put(
-                "messages",
-                buildJsonArray {
-                    messages.forEachIndexed { index, text ->
-                        add(
-                            buildJsonObject {
-                                put("role", "user")
-                                put("entryId", "entry-$index")
-                                put("content", text)
-                            },
-                        )
-                    }
-                },
-            )
-        }
-
-    companion object {
+    private companion object {
         private const val INITIAL_LOAD_WAIT_ATTEMPTS = 200
         private const val INITIAL_LOAD_WAIT_STEP_MS = 5L
+        private const val WAIT_FOR_STATE_ATTEMPTS = 200
+        private const val WAIT_FOR_STATE_STEP_MS = 5L
     }
 }
